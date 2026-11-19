@@ -1,11 +1,27 @@
 # Seguridad y privacidad
 
+## Configuración de Supabase
+
+La app lee `SUPABASE_URL` y `SUPABASE_PUBLISHABLE_KEY` desde defines de
+compilación y, si no están presentes, desde `assets/supabase.env.json`. El
+archivo local `supabase.env.json` y su copia en `assets/` están excluidos de Git
+y no deben subirse a ningún repositorio. No se usa `dotenv`, no hay secretos en
+el código fuente y el cliente usa exclusivamente la Publishable key. La
+validación rechaza claves `service_role`, `sb_secret_` y demás credenciales
+administrativas. Los errores no incluyen valores sensibles y la inicialización
+se realiza con `debug: false`.
+
+La información se conserva primero en el dispositivo y se envía a Supabase
+mediante un outbox con RLS por usuario. Consulta
+[CONFIGURACION_SUPABASE.md](CONFIGURACION_SUPABASE.md).
+
 ## 1. Modelo de privacidad
 
-Alerta Sísmica es una aplicación local. No tiene backend propio, analítica,
-publicidad ni sincronización en la nube. La cuenta, los contactos, la
-configuración, la emergencia activa y el historial se guardan en el
-almacenamiento privado de la app en el dispositivo.
+Alerta Sísmica mantiene una copia local funcional y sincroniza con Supabase
+cuando hay sesión y conectividad. No tiene analítica ni publicidad. La cuenta,
+los contactos, la configuración, la emergencia activa y el historial se guardan
+primero en el almacenamiento privado de la app y luego se envían a las tablas
+protegidas por RLS del usuario autenticado.
 
 Datos almacenados:
 

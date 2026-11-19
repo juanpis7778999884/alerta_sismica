@@ -1,14 +1,14 @@
 # Alerta Sísmica
 
 Aplicación Flutter de monitoreo sísmico, consulta offline y solicitud de ayuda
-SOS con contactos de emergencia. Toda la información del usuario permanece en el
-dispositivo; la app no tiene servidor propio.
+SOS con contactos de emergencia. La información del usuario se conserva en el
+dispositivo y se sincroniza con Supabase cuando hay sesión disponible.
 
 - Versión: `1.0.0+1`
 - Plataforma principal: Android (`minSdk 24`, Android 7.0 o superior)
 - APK de depuración generado:
   `build/app/outputs/flutter-apk/app-debug.apk`
-- Estado de verificación: `flutter analyze` sin incidencias, 37 pruebas
+- Estado de verificación: `flutter analyze` sin incidencias, 70 pruebas
   unitarias aprobadas y compilación Android correcta.
 
 ## Qué hace la app
@@ -23,9 +23,9 @@ dispositivo; la app no tiene servidor propio.
   compartirlo con el selector del sistema, abrir la ubicación en un mapa y
   abrir el marcador telefónico del número de emergencia configurado.
 - Lleva un historial local de emergencias finalizadas y el estado de cada aviso.
-- Registra una cuenta local con contraseña protegida mediante
-  PBKDF2-HMAC-SHA256, sesión de 30 días y código de recuperación de un solo uso
-  mostrado una única vez.
+- Registra la cuenta con Supabase Auth cuando hay configuración disponible y
+  mantiene una copia local protegida mediante PBKDF2-HMAC-SHA256, sesión de 30
+  días y código de recuperación de un solo uso mostrado una única vez.
 - Ofrece notificaciones locales de sismos nuevos y de emergencia activa.
 - Incluye diagnóstico de conectividad, permisos de ubicación, canales de aviso
   y notificaciones.
@@ -39,7 +39,6 @@ dispositivo; la app no tiene servidor propio.
   (entrega sin confirmar)" significa exactamente eso.
 - No recibe notificaciones push remotas ni funciona como servicio en segundo
   plano con la app cerrada.
-- No sincroniza datos entre dispositivos ni posee backend de cuentas.
 - No activa la red satelital; solo reporta si el sistema operativo la detecta.
 
 ## Requisitos de desarrollo
@@ -55,6 +54,22 @@ dispositivo; la app no tiene servidor propio.
 flutter pub get
 flutter run
 ```
+
+La configuración de Supabase se carga automáticamente desde
+`assets/supabase.env.json`, que se copia desde el `supabase.env.json` local y
+está excluido de Git. Por eso `flutter run` ya conecta con Supabase sin flags.
+
+El flag siguiente sigue funcionando y tiene prioridad cuando se usa:
+
+```powershell
+flutter run --dart-define-from-file=supabase.env.json
+```
+
+Crea una copia de `supabase.env.example.json` como `supabase.env.json` y rellena
+`SUPABASE_URL` y `SUPABASE_PUBLISHABLE_KEY` con los valores de tu proyecto. Si
+cambias esos valores, vuelve a copiar el archivo a `assets/`. Solo se incluye la
+Publishable key en el bundle; nunca se usan claves secretas ni administrativas.
+Consulta [docs/CONFIGURACION_SUPABASE.md](docs/CONFIGURACION_SUPABASE.md).
 
 Comprobaciones de calidad:
 
@@ -129,6 +144,7 @@ No hay servidores propios, analítica ni publicidad.
 - [Manual de uso](docs/MANUAL_DE_USO.md)
 - [Seguridad y privacidad](docs/SEGURIDAD_Y_PRIVACIDAD.md)
 - [Informe final A–H](INFORME_FINAL.md)
+- [Configuración de Supabase](docs/CONFIGURACION_SUPABASE.md)
 
 ## Limitaciones conocidas y pendientes externos
 

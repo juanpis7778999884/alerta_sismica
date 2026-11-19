@@ -1,9 +1,12 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 import '../core/errors/app_exception.dart';
+import '../core/sync/supabase_gateway.dart';
+import '../core/sync/supabase_sync_queue.dart';
 import '../core/utils/validators.dart';
 import '../models/usuario.dart';
 import '../services/password_hasher.dart';
@@ -19,17 +22,30 @@ class ResultadoRegistro {
 }
 
 class AuthRepository {
-  AuthRepository({PasswordHasher? hasher, Uuid? uuid, Duration? duracionSesion})
-    : _hasher = hasher ?? const PasswordHasher(),
-      _uuid = uuid ?? const Uuid(),
-      _duracionSesion = duracionSesion ?? const Duration(days: 30);
+  AuthRepository({
+    PasswordHasher? hasher,
+    Uuid? uuid,
+    Duration? duracionSesion,
+    SupabaseGateway? gateway,
+    this._sync,
+  }) : _hasher = hasher ?? const PasswordHasher(),
+       _uuid = uuid ?? const Uuid(),
+       _duracionSesion = duracionSesion ?? const Duration(days: 30),
+       _gateway = gateway ?? FlutterSupabaseGateway();
 
   static const String _claveCuenta = 'auth_cuenta_v1';
   static const String _claveSesion = 'auth_sesion_v1';
+  static const String _claveRecordar = 'auth_recordar_supabase_v1';
 
   final PasswordHasher _hasher;
   final Uuid _uuid;
   final Duration _duracionSesion;
+  final SupabaseGateway _gateway;
+  final SupabaseSyncQueue? _sync;
+
+  Stream<SupabaseAuthEvent> get cambiosSesion => _gateway.authStateChanges;
+
+  bool get _supabaseActivo => _gateway.isReady;
 
   Future<bool> existeCuenta() async {
     final prefs = await SharedPreferences.getInstance();
@@ -48,9 +64,11 @@ class AuthRepository {
     required String password,
     required bool recordarSesion,
   }) async {
-    final errorNombre = Validators.nombreUsuario(nombre);
+    final nombreLimpio = nombre.trim();
+    final emailLimpio = email.trim().toLowerCase();
+    final errorNombre = Validators.nombreUsuario(nombreLimpio);
     if (errorNombre != null) throw ValidationException(errorNombre);
-    final errorEmail = Validators.email(email);
+    final errorEmail = Validators.email(emailLimpio);
     if (errorEmail != null) throw ValidationException(errorEmail);
     final errorPassword = Validators.password(password);
     if (errorPassword != null) throw ValidationException(errorPassword);
@@ -63,33 +81,71 @@ class AuthRepository {
       );
     }
 
-    final usuario = UsuarioLocal(
-      id: _uuid.v4(),
-      nombre: nombre.trim(),
-      email: email.trim().toLowerCase(),
+    final legacyId = _uuid.v4();
+    var usuario = UsuarioLocal(
+      id: legacyId,
+      nombre: nombreLimpio,
+      email: emailLimpio,
       creadoEn: DateTime.now(),
     );
     final codigoRecuperacion = _hasher.generarCodigoRecuperacion();
-    final saltPassword = _hasher.generarSalt();
-    final saltRecuperacion = _hasher.generarSalt();
+    final credenciales = _crearCredenciales(password, codigoRecuperacion);
 
-    final cuenta = {
+    String? remoteId;
+    if (_supabaseActivo) {
+      final remoto = await _gateway.signUp(
+        email: emailLimpio,
+        password: password,
+        nombre: nombreLimpio,
+      );
+      if (remoto.outcome == SupabaseAuthOutcome.confirmationRequired) {
+        throw const AuthException(
+          'Revisa tu correo para confirmar la cuenta antes de ingresar.',
+          codigo: 'confirmacion_pendiente',
+        );
+      }
+      if (remoto.identity == null) {
+        throw const AuthException(
+          'No se pudo crear la cuenta. Inténtalo de nuevo.',
+          codigo: 'supabase_registro',
+        );
+      }
+      final identidad = remoto.identity!;
+      remoteId = identidad.id;
+      usuario = UsuarioLocal(
+        id: identidad.id,
+        nombre: nombreLimpio,
+        email: identidad.email,
+        creadoEn: DateTime.now(),
+      );
+      await prefs.setBool(_claveRecordar, recordarSesion);
+    }
+
+    final cuenta = <String, dynamic>{
       'usuario': usuario.toJson(),
-      'credenciales': {
-        'saltPassword': saltPassword,
-        'hashPassword': _hasher.derivar(password, saltPassword),
-        'iteraciones': _hasher.iteraciones,
-        'saltRecuperacion': saltRecuperacion,
-        'hashRecuperacion': _hasher.derivar(
-          codigoRecuperacion,
-          saltRecuperacion,
-        ),
-      },
+      'credenciales': credenciales,
+      'legacyLocalId': legacyId,
+      'remoteId': remoteId,
+      'vinculado': remoteId != null,
+      'pendienteConfirmacion': false,
     };
-
     final guardado = await prefs.setString(_claveCuenta, jsonEncode(cuenta));
     if (!guardado) {
       throw const StorageException('No se pudo guardar la cuenta local.');
+    }
+
+    if (remoteId != null) {
+      await _asegurarPerfil(
+        SupabaseIdentity(
+          id: remoteId,
+          email: usuario.email,
+          nombre: usuario.nombre,
+        ),
+        legacyId,
+      );
+      await _asegurarAjustes(remoteId);
+    } else {
+      await prefs.remove(_claveRecordar);
     }
 
     if (recordarSesion) {
@@ -123,34 +179,57 @@ class AuthRepository {
       );
     }
 
-    final usuario = _usuarioDesdeCuenta(cuenta);
-    final credenciales = _credencialesDesdeCuenta(cuenta);
-    final coincideEmail =
-        usuario.email.toLowerCase() == email.trim().toLowerCase();
-    final salt = credenciales['saltPassword'] as String? ?? '';
-    final hash = credenciales['hashPassword'] as String? ?? '';
-    final iteraciones =
-        (credenciales['iteraciones'] as num?)?.toInt() ?? _hasher.iteraciones;
+    final usuarioLocal = _validarCredencialesLocal(
+      cuenta: cuenta,
+      email: email,
+      password: password,
+    );
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_claveRecordar, _supabaseActivo ? recordarSesion : false);
 
-    final passwordValida =
-        salt.isNotEmpty &&
-        hash.isNotEmpty &&
-        _hasher.verificar(password, salt, hash, iteraciones: iteraciones);
+    if (!_supabaseActivo) {
+      if (recordarSesion) {
+        await _guardarSesion(usuarioLocal);
+      } else {
+        await prefs.remove(_claveSesion);
+      }
+      return usuarioLocal;
+    }
 
-    if (!coincideEmail || !passwordValida) {
+    final correo = usuarioLocal.email;
+    final vinculado = cuenta['vinculado'] == true || cuenta['remoteId'] != null;
+    SupabaseAuthResult remoto;
+    if (vinculado) {
+      remoto = await _gateway.signIn(email: correo, password: password);
+    } else {
+      remoto = await _gateway.signIn(email: correo, password: password);
+      if (remoto.outcome == SupabaseAuthOutcome.invalidCredentials) {
+        remoto = await _gateway.signUp(
+          email: correo,
+          password: password,
+          nombre: usuarioLocal.nombre,
+        );
+      }
+    }
+
+    if (remoto.outcome == SupabaseAuthOutcome.confirmationRequired) {
       throw const AuthException(
-        'Correo o contraseña incorrectos.',
-        codigo: 'credenciales_invalidas',
+        'Revisa tu correo para confirmar la cuenta antes de ingresar.',
+        codigo: 'confirmacion_pendiente',
+      );
+    }
+    if (remoto.identity == null) {
+      throw const AuthException(
+        'No se pudo iniciar sesión. Inténtalo de nuevo.',
+        codigo: 'supabase_login',
       );
     }
 
-    final prefs = await SharedPreferences.getInstance();
-    if (recordarSesion) {
-      await _guardarSesion(usuario);
-    } else {
-      await prefs.remove(_claveSesion);
-    }
-    return usuario;
+    return _vincularSesion(
+      cuenta: cuenta,
+      identidad: remoto.identity!,
+      recordarSesion: recordarSesion,
+    );
   }
 
   Future<String> recuperarPassword({
@@ -202,26 +281,268 @@ class AuthRepository {
     }
 
     final nuevoCodigo = _hasher.generarCodigoRecuperacion();
-    final saltPassword = _hasher.generarSalt();
-    final saltRecuperacionNuevo = _hasher.generarSalt();
-    final nuevaCuenta = {
-      'usuario': usuario.toJson(),
-      'credenciales': {
-        'saltPassword': saltPassword,
-        'hashPassword': _hasher.derivar(nuevoPassword, saltPassword),
-        'iteraciones': _hasher.iteraciones,
-        'saltRecuperacion': saltRecuperacionNuevo,
-        'hashRecuperacion': _hasher.derivar(nuevoCodigo, saltRecuperacionNuevo),
-      },
-    };
+    final nuevasCredenciales = _crearCredenciales(
+      nuevoPassword,
+      nuevoCodigo,
+    );
+    final nuevaCuenta = Map<String, dynamic>.from(cuenta)
+      ..['usuario'] = usuario.toJson()
+      ..['credenciales'] = nuevasCredenciales;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_claveCuenta, jsonEncode(nuevaCuenta));
     await prefs.remove(_claveSesion);
+
+    if (_supabaseActivo) {
+      try {
+        if (_gateway.currentUserId != null) {
+          await _gateway.updatePassword(nuevoPassword);
+        } else {
+          await _gateway.requestPasswordReset(usuario.email);
+        }
+      } catch (_) {}
+    }
+
     return nuevoCodigo;
   }
 
   Future<UsuarioLocal?> restaurarSesion() async {
     final prefs = await SharedPreferences.getInstance();
+    final recordar = prefs.getBool(_claveRecordar) ?? true;
+
+    if (!_supabaseActivo) {
+      await prefs.remove(_claveRecordar);
+      return _restaurarSesionLocal(prefs);
+    }
+
+    if (!recordar) {
+      await _gateway.signOut();
+      await prefs.remove(_claveSesion);
+      return null;
+    }
+
+    final identidad = await _gateway.restoreSession();
+    if (identidad == null) {
+      await prefs.remove(_claveSesion);
+      return null;
+    }
+
+    final cuenta = await _leerCuenta();
+    if (cuenta == null) {
+      await prefs.remove(_claveSesion);
+      return null;
+    }
+
+    final usuario = _usuarioDesdeCuenta(cuenta);
+    if (usuario.id == identidad.id &&
+        cuenta['remoteId'] == identidad.id &&
+        cuenta['vinculado'] == true) {
+      await _asegurarPerfil(
+        identidad,
+        cuenta['legacyLocalId'] as String?,
+        nombre: usuario.nombre,
+      );
+      await _asegurarAjustes(identidad.id);
+      await _guardarSesion(usuario);
+      return usuario;
+    }
+
+    return _vincularSesion(
+      cuenta: cuenta,
+      identidad: identidad,
+      recordarSesion: true,
+    );
+  }
+
+  Future<void> cerrarSesion() async {
+    if (_supabaseActivo) {
+      try {
+        await _gateway.signOut();
+      } catch (_) {}
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_claveSesion);
+    await prefs.setBool(_claveRecordar, false);
+  }
+
+  Future<void> eliminarCuentaLocal() async {
+    if (_supabaseActivo) {
+      try {
+        await _gateway.signOut();
+      } catch (_) {}
+    }
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_claveCuenta);
+    await prefs.remove(_claveSesion);
+    await prefs.remove(_claveRecordar);
+  }
+
+  Map<String, dynamic> _crearCredenciales(
+    String password,
+    String codigoRecuperacion,
+  ) {
+    final saltPassword = _hasher.generarSalt();
+    final saltRecuperacion = _hasher.generarSalt();
+    return {
+      'saltPassword': saltPassword,
+      'hashPassword': _hasher.derivar(password, saltPassword),
+      'iteraciones': _hasher.iteraciones,
+      'saltRecuperacion': saltRecuperacion,
+      'hashRecuperacion': _hasher.derivar(
+        codigoRecuperacion,
+        saltRecuperacion,
+      ),
+    };
+  }
+
+  UsuarioLocal _validarCredencialesLocal({
+    required Map<String, dynamic> cuenta,
+    required String email,
+    required String password,
+  }) {
+    final usuario = _usuarioDesdeCuenta(cuenta);
+    final credenciales = _credencialesDesdeCuenta(cuenta);
+    final coincideEmail =
+        usuario.email.toLowerCase() == email.trim().toLowerCase();
+    final salt = credenciales['saltPassword'] as String? ?? '';
+    final hash = credenciales['hashPassword'] as String? ?? '';
+    final iteraciones =
+        (credenciales['iteraciones'] as num?)?.toInt() ?? _hasher.iteraciones;
+    final passwordValida =
+        salt.isNotEmpty &&
+        hash.isNotEmpty &&
+        _hasher.verificar(password, salt, hash, iteraciones: iteraciones);
+
+    if (!coincideEmail || !passwordValida) {
+      throw const AuthException(
+        'Correo o contraseña incorrectos.',
+        codigo: 'credenciales_invalidas',
+      );
+    }
+    return usuario;
+  }
+
+  Future<UsuarioLocal> _vincularSesion({
+    required Map<String, dynamic> cuenta,
+    required SupabaseIdentity identidad,
+    required bool recordarSesion,
+  }) async {
+    final usuarioAnterior = _usuarioDesdeCuenta(cuenta);
+    final anteriorId = usuarioAnterior.id;
+    final legacyId =
+        (cuenta['legacyLocalId'] as String?) ??
+        (cuenta['remoteId'] as String?) ??
+        anteriorId;
+    final usuario = UsuarioLocal(
+      id: identidad.id,
+      nombre: usuarioAnterior.nombre,
+      email: identidad.email,
+      creadoEn: usuarioAnterior.creadoEn,
+    );
+
+    final cuentaActualizada = Map<String, dynamic>.from(cuenta)
+      ..['usuario'] = usuario.toJson()
+      ..['legacyLocalId'] = legacyId
+      ..['remoteId'] = identidad.id
+      ..['vinculado'] = true
+      ..['pendienteConfirmacion'] = false;
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_claveCuenta, jsonEncode(cuentaActualizada));
+
+    if (anteriorId != identidad.id) {
+      await _sync?.rebindUser(anteriorId, identidad.id);
+    }
+
+    await _asegurarPerfil(identidad, legacyId, nombre: usuario.nombre);
+    await _asegurarAjustes(identidad.id);
+
+    if (recordarSesion) {
+      await _guardarSesion(usuario);
+    } else {
+      await prefs.remove(_claveSesion);
+    }
+
+    return usuario;
+  }
+
+  Future<void> _asegurarPerfil(
+    SupabaseIdentity identidad,
+    String? legacyId, {
+    String? nombre,
+  }) async {
+    if (!_supabaseActivo) return;
+    final nombrePerfil = (nombre ?? identidad.nombre).trim().isNotEmpty
+        ? (nombre ?? identidad.nombre).trim()
+        : identidad.nombre;
+    try {
+      final filas = await _gateway.selectRows(
+        'profiles',
+        filters: {'id': identidad.id},
+      );
+      if (filas.isEmpty) {
+        final valores = <String, dynamic>{
+          'id': identidad.id,
+          'nombre': nombrePerfil,
+          'email': identidad.email,
+          'cliente_actualizado_en': DateTime.now().toUtc().toIso8601String(),
+        };
+        if (legacyId != null) valores['legacy_local_id'] = legacyId;
+        await _gateway.upsertRow(
+          table: 'profiles',
+          keys: {'id': identidad.id},
+          insertValues: valores,
+          updateValues: {
+            'nombre': nombrePerfil,
+            'cliente_actualizado_en':
+                DateTime.now().toUtc().toIso8601String(),
+          },
+        );
+        return;
+      }
+      await _gateway.upsertRow(
+        table: 'profiles',
+        keys: {'id': identidad.id},
+        insertValues: {
+          'id': identidad.id,
+          'nombre': nombrePerfil,
+          'email': identidad.email,
+          'cliente_actualizado_en': DateTime.now().toUtc().toIso8601String(),
+        },
+        updateValues: {
+          'nombre': nombrePerfil,
+          'cliente_actualizado_en': DateTime.now().toUtc().toIso8601String(),
+        },
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _asegurarAjustes(String userId) async {
+    if (!_supabaseActivo) return;
+    try {
+      final filas = await _gateway.selectRows(
+        'user_settings',
+        filters: {'user_id': userId},
+      );
+      if (filas.isNotEmpty) return;
+      await _gateway.upsertRow(
+        table: 'user_settings',
+        keys: {'user_id': userId},
+        insertValues: {
+          'user_id': userId,
+          'tema': 'claro',
+          'magnitud_minima': 2.5,
+          'auto_refresco': true,
+          'notificar_sismos': false,
+          'umbral_notificacion': 4.5,
+          'numero_emergencia': '',
+          'cliente_actualizado_en': DateTime.now().toUtc().toIso8601String(),
+        },
+        updateValues: {},
+      );
+    } catch (_) {}
+  }
+
+  Future<UsuarioLocal?> _restaurarSesionLocal(SharedPreferences prefs) async {
     final raw = prefs.getString(_claveSesion);
     if (raw == null || raw.isEmpty) return null;
     try {
@@ -249,17 +570,6 @@ class AuthRepository {
     }
   }
 
-  Future<void> cerrarSesion() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_claveSesion);
-  }
-
-  Future<void> eliminarCuentaLocal() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove(_claveCuenta);
-    await prefs.remove(_claveSesion);
-  }
-
   Future<void> _guardarSesion(UsuarioLocal usuario) async {
     final prefs = await SharedPreferences.getInstance();
     final sesion = {
@@ -279,9 +589,7 @@ class AuthRepository {
       if (json is Map) {
         return Map<String, dynamic>.from(json);
       }
-    } catch (_) {
-      // Cuenta corrupta: se trata como inexistente.
-    }
+    } catch (_) {}
     return null;
   }
 

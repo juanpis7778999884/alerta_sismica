@@ -4,7 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
 
+import 'core/config/supabase_initializer.dart';
+import 'core/config/supabase_runtime_config.dart';
 import 'core/navigation/app_navigator.dart';
+import 'core/sync/supabase_gateway.dart';
+import 'core/sync/supabase_sync_queue.dart';
 import 'models/configuracion_app.dart';
 import 'providers/auth_provider.dart';
 import 'providers/conectividad_provider.dart';
@@ -32,17 +36,51 @@ import 'theme.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  final settingsRepository = SettingsRepository();
-  final authRepository = AuthRepository();
-  final contactosRepository = ContactosRepository();
-  final emergenciasRepository = EmergenciasRepository();
-  final sismosRepository = SismosRepository();
+  final supabaseEnv = await SupabaseRuntimeConfig.cargar();
+  await SupabaseInitializer(
+    readEnvironment: (name) => supabaseEnv[name] ?? '',
+  ).initialize();
+
+  final supabaseGateway = FlutterSupabaseGateway();
+  final syncQueue = SupabaseSyncQueue(gateway: supabaseGateway);
+  await syncQueue.initialize();
+  final syncCoordinator = SupabaseSyncCoordinator(
+    gateway: supabaseGateway,
+    queue: syncQueue,
+  );
+  final settingsRepository = SettingsRepository(
+    gateway: supabaseGateway,
+    sync: syncQueue,
+  );
+  final authRepository = AuthRepository(
+    gateway: supabaseGateway,
+    sync: syncQueue,
+  );
+  final contactosRepository = ContactosRepository(
+    gateway: supabaseGateway,
+    sync: syncQueue,
+  );
+  final emergenciasRepository = EmergenciasRepository(
+    gateway: supabaseGateway,
+    sync: syncQueue,
+  );
+  final sismosRepository = SismosRepository(
+    gateway: supabaseGateway,
+    sync: syncQueue,
+  );
   final locationService = LocationService();
   final connectivityService = ConnectivityService();
   final emergencyChannels = EmergencyChannelService();
   final geocodingService = NominatimGeocodingService();
   final notificationService = NotificationService();
   await notificationService.inicializar();
+
+  syncCoordinator.registerPull(() async {
+    await settingsRepository.sincronizarDesdeRemoto();
+  });
+  syncCoordinator.registerPull(contactosRepository.sincronizarDesdeRemoto);
+  syncCoordinator.registerPull(emergenciasRepository.sincronizarDesdeRemoto);
+  syncCoordinator.registerPull(sismosRepository.sincronizarGuardadosDesdeRemoto);
 
   final configuracionProvider = ConfiguracionProvider(
     repository: settingsRepository,
@@ -71,7 +109,7 @@ Future<void> main() async {
   );
 
   unawaited(configuracionProvider.inicializar());
-  unawaited(authProvider.inicializar());
+  unawaited(authProvider.inicializar().whenComplete(syncCoordinator.start));
   unawaited(ubicacionProvider.inicializar());
   unawaited(conectividadProvider.inicializar());
   unawaited(contactosProvider.inicializar());

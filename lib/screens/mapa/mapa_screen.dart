@@ -108,6 +108,9 @@ class _MapaSismosScreenState extends State<MapaSismosScreen> {
             TileLayer(
               urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
               userAgentPackageName: 'com.example.alerta_sismica',
+              tileProvider: NetworkTileProvider(
+                cachingProvider: const DisabledMapCachingProvider(),
+              ),
             ),
             if (usuario != null) ...[
               CircleLayer(

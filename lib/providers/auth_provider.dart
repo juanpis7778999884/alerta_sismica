@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../core/errors/app_exception.dart';
+import '../core/sync/supabase_gateway.dart';
 import '../models/usuario.dart';
 import '../repositories/auth_repository.dart';
 
@@ -8,9 +11,12 @@ enum EstadoAuth { inicial, cargando, autenticado, noAutenticado }
 
 class AuthProvider extends ChangeNotifier {
   AuthProvider({AuthRepository? repository})
-    : _repository = repository ?? AuthRepository();
+    : _repository = repository ?? AuthRepository() {
+    _suscripcion = _repository.cambiosSesion.listen(_atenderCambioSesion);
+  }
 
   final AuthRepository _repository;
+  StreamSubscription<SupabaseAuthEvent>? _suscripcion;
 
   EstadoAuth _estado = EstadoAuth.inicial;
   UsuarioLocal? _usuario;
@@ -201,5 +207,21 @@ class AuthProvider extends ChangeNotifier {
   String _describir(Object error) {
     if (error is AppException) return error.message;
     return 'No se pudo recuperar la sesión local.';
+  }
+
+  void _atenderCambioSesion(SupabaseAuthEvent evento) {
+    if (evento.kind != SupabaseAuthEventKind.signedOut) return;
+    if (_usuario == null && _estado != EstadoAuth.autenticado) return;
+    _usuario = null;
+    _estado = EstadoAuth.noAutenticado;
+    _error = null;
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _suscripcion?.cancel();
+    _suscripcion = null;
+    super.dispose();
   }
 }
