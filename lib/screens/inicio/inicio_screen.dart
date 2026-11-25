@@ -18,6 +18,7 @@ import '../alerta/alerta_sismo_screen.dart';
 import '../conectividad/conectividad_screen.dart';
 import '../contactos/contactos_screen.dart';
 import '../historial/historial_screen.dart';
+import '../movimiento/monitor_movimiento_screen.dart';
 import '../sismos/detalle_sismo_screen.dart';
 
 class InicioScreen extends StatelessWidget {
@@ -431,6 +432,15 @@ class InicioScreen extends StatelessWidget {
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(
                     builder: (_) => const ContactosScreen(),
+                  ),
+                ),
+              ),
+              _AccesoRapido(
+                icono: Icons.sensors_rounded,
+                titulo: 'Monitor de movimiento',
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const MonitorMovimientoScreen(),
                   ),
                 ),
               ),
