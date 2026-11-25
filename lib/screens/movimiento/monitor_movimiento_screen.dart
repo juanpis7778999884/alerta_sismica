@@ -35,6 +35,7 @@ class _MonitorMovimientoScreenState extends State<MonitorMovimientoScreen>
       final movimiento = context.read<MovimientoProvider>();
       movimiento.addListener(_atenderMovimientoInusual);
       await _notificaciones.inicializar();
+      await _notificaciones.solicitarPermiso();
       if (mounted) movimiento.iniciar();
     });
   }
