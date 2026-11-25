@@ -1,9 +1,15 @@
+import 'dart:async';
 import 'dart:ui' show FontFeature;
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../providers/movimiento_provider.dart';
+import '../../providers/auth_provider.dart';
+import '../../providers/contactos_provider.dart';
+import '../../providers/emergencia_provider.dart';
+import '../../models/emergencia.dart';
+import '../../services/notification_service.dart';
 import '../../theme.dart';
 
 class MonitorMovimientoScreen extends StatefulWidget {
@@ -16,13 +22,118 @@ class MonitorMovimientoScreen extends StatefulWidget {
 
 class _MonitorMovimientoScreenState extends State<MonitorMovimientoScreen>
     with WidgetsBindingObserver {
+  final NotificationService _notificaciones = NotificationService();
+  Timer? _repeticionAlerta;
+  bool _dialogoAlertaAbierto = false;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) context.read<MovimientoProvider>().iniciar();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      final movimiento = context.read<MovimientoProvider>();
+      movimiento.addListener(_atenderMovimientoInusual);
+      await _notificaciones.inicializar();
+      if (mounted) movimiento.iniciar();
     });
+  }
+
+  void _atenderMovimientoInusual() {
+    if (!mounted || _dialogoAlertaAbierto) return;
+    if (!context.read<MovimientoProvider>().alertaMovimiento) return;
+    _dialogoAlertaAbierto = true;
+    unawaited(_mostrarConfirmacionSeguridad());
+  }
+
+  Future<void> _mostrarConfirmacionSeguridad() async {
+    await _notificaciones.mostrarAlertaMovimiento();
+    _repeticionAlerta?.cancel();
+    _repeticionAlerta = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => unawaited(_notificaciones.mostrarAlertaMovimiento()),
+    );
+
+    final respuesta = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        icon: const Icon(Icons.warning_amber_rounded, size: 38),
+        title: const Text('¿Estás bien?'),
+        content: const Text(
+          'Se detectó movimiento inusual en el teléfono. '
+          'Confirma que estás bien o activa SOS si necesitas ayuda. '
+          'Si no respondes, volveremos a mostrar la notificación cada 30 segundos.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop('bien'),
+            child: const Text('Estoy bien'),
+          ),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(
+              backgroundColor: Colors.red.shade700,
+            ),
+            onPressed: () => Navigator.of(dialogContext).pop('sos'),
+            icon: const Icon(Icons.sos_rounded),
+            label: const Text('Activar SOS'),
+          ),
+        ],
+      ),
+    );
+
+    _repeticionAlerta?.cancel();
+    _repeticionAlerta = null;
+    await _notificaciones.cancelarAlertaMovimiento();
+    _dialogoAlertaAbierto = false;
+
+    if (!mounted || respuesta == null) return;
+    if (respuesta == 'sos') {
+      await _activarSosPorMovimiento();
+    } else if (respuesta == 'bien') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Gracias por confirmar que estás bien.')),
+      );
+    }
+  }
+
+  Future<void> _activarSosPorMovimiento() async {
+    final usuario = context.read<AuthProvider>().usuario;
+    final contactos = context.read<ContactosProvider>().contactos;
+    if (usuario == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Inicia sesión para activar el SOS.')),
+      );
+      return;
+    }
+    if (contactos.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Agrega contactos de emergencia antes de activar SOS.'),
+        ),
+      );
+      return;
+    }
+
+    final emergencia = context.read<EmergenciaProvider>();
+    final resultado = await emergencia.activarSos(
+      usuario: usuario,
+      contactos: contactos,
+      tipo: TipoEmergencia.sos,
+      referenciaEvento: 'Movimiento inusual detectado por el monitor experimental.',
+    );
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(resultado.mensaje)),
+    );
+    if (!resultado.exitosa || resultado.yaExistia) return;
+
+    final envio = await emergencia.intentarEnvioInicial();
+    if (!mounted || envio == null) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(envio)),
+    );
   }
 
   @override
@@ -39,7 +150,11 @@ class _MonitorMovimientoScreenState extends State<MonitorMovimientoScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    context.read<MovimientoProvider>().detener();
+    _repeticionAlerta?.cancel();
+    context.read<MovimientoProvider>()
+      ..removeListener(_atenderMovimientoInusual)
+      ..detener();
+    _notificaciones.cancelarAlertaMovimiento();
     super.dispose();
   }
 
