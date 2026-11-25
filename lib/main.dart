@@ -16,6 +16,7 @@ import 'providers/configuracion_provider.dart';
 import 'providers/contactos_provider.dart';
 import 'providers/emergencia_provider.dart';
 import 'providers/sismos_provider.dart';
+import 'providers/movimiento_provider.dart';
 import 'providers/ubicacion_provider.dart';
 import 'repositories/auth_repository.dart';
 import 'repositories/contactos_repository.dart';
@@ -126,6 +127,7 @@ Future<void> main() async {
         ChangeNotifierProvider.value(value: contactosProvider),
         ChangeNotifierProvider.value(value: emergenciaProvider),
         ChangeNotifierProvider.value(value: sismosProvider),
+        ChangeNotifierProvider(create: (_) => MovimientoProvider()),
       ],
       child: const AlertaSismicaApp(),
     ),
