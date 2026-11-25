@@ -118,6 +118,25 @@ class NotificationService implements NotificationGateway {
     }
   }
 
+  Future<void> mostrarAlertaMovimiento() async {
+    await _mostrar(
+      id: 4001,
+      titulo: '¿Estás bien?',
+      cuerpo: 'Alerta Sísmica detectó movimiento inusual. Abre la app y confirma tu estado.',
+      android: _detalleEmergencia,
+      payload: 'confirmacion_movimiento',
+    );
+  }
+
+  Future<void> cancelarAlertaMovimiento() async {
+    if (!_inicializado) return;
+    try {
+      await _plugin.cancel(id: 4001);
+    } catch (_) {
+      // La cancelación de la notificación no debe bloquear el flujo.
+    }
+  }
+
   @override
   Future<void> mostrarEmergenciaActiva(Emergencia emergencia) async {
     await _mostrar(
