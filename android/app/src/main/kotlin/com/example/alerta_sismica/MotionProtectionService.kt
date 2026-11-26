@@ -144,8 +144,11 @@ class MotionProtectionService : Service(), SensorEventListener {
             this, 7103, okIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val sosIntent = Intent(this, MotionActionReceiver::class.java).setAction(ACTION_SOS)
-        val sosPending = PendingIntent.getBroadcast(
+        val sosIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra("protection_sos_requested", true)
+        }
+        val sosPending = PendingIntent.getActivity(
             this, 7104, sosIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
