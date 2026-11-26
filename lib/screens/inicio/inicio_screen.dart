@@ -19,6 +19,7 @@ import '../conectividad/conectividad_screen.dart';
 import '../contactos/contactos_screen.dart';
 import '../historial/historial_screen.dart';
 import '../movimiento/monitor_movimiento_screen.dart';
+import '../movimiento/proteccion_sismica_screen.dart';
 import '../sismos/detalle_sismo_screen.dart';
 
 class InicioScreen extends StatelessWidget {
@@ -432,6 +433,15 @@ class InicioScreen extends StatelessWidget {
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(
                     builder: (_) => const ContactosScreen(),
+                  ),
+                ),
+              ),
+              _AccesoRapido(
+                icono: Icons.shield_rounded,
+                titulo: 'Protección sísmica',
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const ProteccionSismicaScreen(),
                   ),
                 ),
               ),
