@@ -1,0 +1,25 @@
+import 'package:flutter/services.dart';
+
+class MotionProtectionService {
+  MotionProtectionService._();
+
+  static const MethodChannel _channel =
+      MethodChannel('com.example.alerta_sismica/motion_protection');
+
+  static Future<bool> iniciar() async =>
+      await _channel.invokeMethod<bool>('startProtection') ?? false;
+
+  static Future<bool> detener() async =>
+      await _channel.invokeMethod<bool>('stopProtection') ?? false;
+
+  static Future<bool> estaActiva() async =>
+      await _channel.invokeMethod<bool>('isProtectionActive') ?? false;
+
+  static void escucharSolicitudSos(Future<void> Function() callback) {
+    _channel.setMethodCallHandler((call) async {
+      if (call.method == 'onProtectionSosRequested') {
+        await callback();
+      }
+    });
+  }
+}
