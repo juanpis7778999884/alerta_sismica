@@ -135,17 +135,20 @@ Future<void> main() async {
     ),
   );
 
-  Future<void> abrirSosProteccion() async {
+  Future<void> abrirAlertaProteccion(bool sosSolicitado) async {
     navigatorKey.currentState?.push(
       MaterialPageRoute<void>(
-        builder: (_) => const ProteccionSismicaScreen(sosSolicitado: true),
+        builder: (_) => ProteccionSismicaScreen(
+          sosSolicitado: sosSolicitado,
+          alertaAbierta: !sosSolicitado,
+        ),
       ),
     );
   }
 
-  MotionProtectionService.escucharSolicitudSos(abrirSosProteccion);
+  MotionProtectionService.escucharSolicitudSos(abrirAlertaProteccion);
   if (await MotionProtectionService.consumirSosPendiente()) {
-    await abrirSosProteccion();
+    await abrirAlertaProteccion(true);
   }
 }
 
