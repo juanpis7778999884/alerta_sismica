@@ -12,6 +12,9 @@ class MotionProtectionService {
   static Future<bool> detener() async =>
       await _channel.invokeMethod<bool>('stopProtection') ?? false;
 
+  static Future<bool> consumirSosPendiente() async =>
+      await _channel.invokeMethod<bool>('consumePendingSos') ?? false;
+
   static Future<bool> estaActiva() async =>
       await _channel.invokeMethod<bool>('isProtectionActive') ?? false;
 
