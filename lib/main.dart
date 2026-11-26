@@ -27,6 +27,8 @@ import 'screens/auth/login_screen.dart';
 import 'screens/auth/registro_screen.dart';
 import 'screens/auth/splash_screen.dart';
 import 'screens/home_shell.dart';
+import 'screens/movimiento/proteccion_sismica_screen.dart';
+import 'services/motion_protection_service.dart';
 import 'services/connectivity_service.dart';
 import 'services/emergency_channels.dart';
 import 'services/geocoding_service.dart';
@@ -132,6 +134,14 @@ Future<void> main() async {
       child: const AlertaSismicaApp(),
     ),
   );
+
+  MotionProtectionService.escucharSolicitudSos(() async {
+    navigatorKey.currentState?.push(
+      MaterialPageRoute<void>(
+        builder: (_) => const ProteccionSismicaScreen(sosSolicitado: true),
+      ),
+    );
+  });
 }
 
 class AlertaSismicaApp extends StatelessWidget {
