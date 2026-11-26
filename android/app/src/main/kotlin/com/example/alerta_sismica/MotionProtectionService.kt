@@ -23,6 +23,7 @@ class MotionProtectionService : Service(), SensorEventListener {
     private val samples = ArrayDeque<Double>()
     private var gravity = doubleArrayOf(0.0, 0.0, 0.0)
     private var gyroMagnitude = 0.0
+    private var gravityInitialized = false
     private var lastAlertAt = 0L
     private var lastNotificationAt = 0L
 
@@ -80,6 +81,11 @@ class MotionProtectionService : Service(), SensorEventListener {
     override fun onSensorChanged(event: SensorEvent) {
         when (event.sensor.type) {
             Sensor.TYPE_ACCELEROMETER -> {
+                if (!gravityInitialized) {
+                    for (i in 0..2) gravity[i] = event.values[i].toDouble()
+                    gravityInitialized = true
+                    return
+                }
                 val alpha = 0.88
                 for (i in 0..2) {
                     gravity[i] = alpha * gravity[i] + (1.0 - alpha) * event.values[i]
@@ -93,7 +99,9 @@ class MotionProtectionService : Service(), SensorEventListener {
                 while (samples.size > 45) samples.removeFirst()
                 if (samples.size >= 12) {
                     val rms = sqrt(samples.average())
-                    if (rms >= RMS_THRESHOLD && now - lastAlertAt >= ALERT_COOLDOWN_MS) {
+                    val unusualRotationWithVibration = rms >= 0.8 && gyroMagnitude >= 2.0
+                    if ((rms >= RMS_THRESHOLD || unusualRotationWithVibration) &&
+                        now - lastAlertAt >= ALERT_COOLDOWN_MS) {
                         lastAlertAt = now
                         beginMovementAlert()
                     }
