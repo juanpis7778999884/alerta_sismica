@@ -34,6 +34,12 @@ class MainActivity : FlutterActivity() {
                     stopService(Intent(this, MotionProtectionService::class.java))
                     result.success(true)
                 }
+                "consumePendingSos" -> {
+                    val prefs = getSharedPreferences(MotionProtectionService.PREFS, MODE_PRIVATE)
+                    val pending = prefs.getBoolean("pending_sos", false)
+                    prefs.edit().putBoolean("pending_sos", false).apply()
+                    result.success(pending)
+                }
                 "isProtectionActive" -> result.success(
                     getSharedPreferences(MotionProtectionService.PREFS, MODE_PRIVATE)
                         .getBoolean(MotionProtectionService.KEY_ACTIVE, false)
