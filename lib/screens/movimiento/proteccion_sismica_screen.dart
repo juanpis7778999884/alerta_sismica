@@ -57,11 +57,17 @@ class _ProteccionSismicaScreenState extends State<ProteccionSismicaScreen> {
       _error = null;
     });
     try {
-      final permiso = await Permission.notification.request();
-      if (!permiso.isGranted && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Activa el permiso de notificaciones para recibir los avisos de protección.')),
-        );
+      if (!_activa) {
+        final permiso = await Permission.notification.request();
+        if (!permiso.isGranted) {
+          if (mounted) {
+            setState(() {
+              _cargando = false;
+              _error = 'Concede el permiso de notificaciones para mantener visible la protección.';
+            });
+          }
+          return;
+        }
       }
       final ok = _activa
           ? await MotionProtectionService.detener()
