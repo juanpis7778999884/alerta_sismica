@@ -12,6 +12,9 @@ class MotionProtectionService {
   static Future<bool> detener() async =>
       await _channel.invokeMethod<bool>('stopProtection') ?? false;
 
+  static Future<bool> consumirAlertaAbierta() async =>
+      await _channel.invokeMethod<bool>('consumePendingAlert') ?? false;
+
   static Future<bool> confirmarBien() async =>
       await _channel.invokeMethod<bool>('confirmMovement') ?? false;
 
@@ -25,7 +28,13 @@ class MotionProtectionService {
     _channel.setMethodCallHandler((call) async {
       if (call.method == 'onProtectionSosRequested' ||
           call.method == 'onMovementAlertOpened') {
-        await callback(call.method == 'onProtectionSosRequested');
+        if (call.method == 'onProtectionSosRequested') {
+          await _channel.invokeMethod<bool>('consumePendingSos');
+          await callback(true);
+        } else {
+          await _channel.invokeMethod<bool>('consumePendingAlert');
+          await callback(false);
+        }
       }
     });
   }
