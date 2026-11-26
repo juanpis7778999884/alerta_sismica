@@ -34,6 +34,13 @@ class MainActivity : FlutterActivity() {
                     stopService(Intent(this, MotionProtectionService::class.java))
                     result.success(true)
                 }
+                "confirmMovement" -> {
+                    getSharedPreferences(MotionProtectionService.PREFS, MODE_PRIVATE).edit()
+                        .putBoolean(MotionProtectionService.KEY_ALERT_PENDING, false).apply()
+                    getSystemService(android.app.NotificationManager::class.java)
+                        .cancel(MotionProtectionService.ALERT_NOTIFICATION_ID)
+                    result.success(true)
+                }
                 "consumePendingSos" -> {
                     val prefs = getSharedPreferences(MotionProtectionService.PREFS, MODE_PRIVATE)
                     val pending = prefs.getBoolean("pending_sos", false)
@@ -47,6 +54,10 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+        if (intent?.getBooleanExtra(MotionProtectionService.EXTRA_MOVEMENT_ALERT, false) == true) {
+            intent.removeExtra(MotionProtectionService.EXTRA_MOVEMENT_ALERT)
+            channel?.invokeMethod("onMovementAlertOpened", null)
+        }
         if (intent?.getBooleanExtra("protection_sos_requested", false) == true) {
             intent.removeExtra("protection_sos_requested")
             channel?.invokeMethod("onProtectionSosRequested", null)
@@ -56,6 +67,10 @@ class MainActivity : FlutterActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        if (intent.getBooleanExtra(MotionProtectionService.EXTRA_MOVEMENT_ALERT, false)) {
+            intent.removeExtra(MotionProtectionService.EXTRA_MOVEMENT_ALERT)
+            channel?.invokeMethod("onMovementAlertOpened", null)
+        }
         if (intent.getBooleanExtra("protection_sos_requested", false)) {
             intent.removeExtra("protection_sos_requested")
             channel?.invokeMethod("onProtectionSosRequested", null)
