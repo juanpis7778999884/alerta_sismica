@@ -21,11 +21,11 @@ class MotionProtectionService {
   static Future<bool> estaActiva() async =>
       await _channel.invokeMethod<bool>('isProtectionActive') ?? false;
 
-  static void escucharSolicitudSos(Future<void> Function() callback) {
+  static void escucharSolicitudSos(Future<void> Function(bool sosSolicitado) callback) {
     _channel.setMethodCallHandler((call) async {
       if (call.method == 'onProtectionSosRequested' ||
           call.method == 'onMovementAlertOpened') {
-        await callback();
+        await callback(call.method == 'onProtectionSosRequested');
       }
     });
   }
