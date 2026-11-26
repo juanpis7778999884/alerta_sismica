@@ -149,6 +149,8 @@ Future<void> main() async {
   MotionProtectionService.escucharSolicitudSos(abrirAlertaProteccion);
   if (await MotionProtectionService.consumirSosPendiente()) {
     await abrirAlertaProteccion(true);
+  } else if (await MotionProtectionService.consumirAlertaAbierta()) {
+    await abrirAlertaProteccion(false);
   }
 }
 
