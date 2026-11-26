@@ -1,5 +1,62 @@
 package com.example.alerta_sismica
 
+import android.content.Intent
+import android.os.Build
 import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.MethodChannel
 
-class MainActivity : FlutterActivity()
+class MainActivity : FlutterActivity() {
+    private var channel: MethodChannel? = null
+
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+        channel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
+        channel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "startProtection" -> {
+                    val prefs = getSharedPreferences(MotionProtectionService.PREFS, MODE_PRIVATE)
+                    prefs.edit().putBoolean(MotionProtectionService.KEY_ACTIVE, true).apply()
+                    val intent = Intent(this, MotionProtectionService::class.java)
+                    try {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent)
+                        else startService(intent)
+                        result.success(true)
+                    } catch (e: Exception) {
+                        prefs.edit().putBoolean(MotionProtectionService.KEY_ACTIVE, false).apply()
+                        result.error("START_FAILED", e.message, null)
+                    }
+                }
+                "stopProtection" -> {
+                    getSharedPreferences(MotionProtectionService.PREFS, MODE_PRIVATE).edit()
+                        .putBoolean(MotionProtectionService.KEY_ACTIVE, false)
+                        .putBoolean(MotionProtectionService.KEY_ALERT_PENDING, false).apply()
+                    stopService(Intent(this, MotionProtectionService::class.java))
+                    result.success(true)
+                }
+                "isProtectionActive" -> result.success(
+                    getSharedPreferences(MotionProtectionService.PREFS, MODE_PRIVATE)
+                        .getBoolean(MotionProtectionService.KEY_ACTIVE, false)
+                )
+                else -> result.notImplemented()
+            }
+        }
+        if (intent?.getBooleanExtra("protection_sos_requested", false) == true) {
+            intent.removeExtra("protection_sos_requested")
+            channel?.invokeMethod("onProtectionSosRequested", null)
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.getBooleanExtra("protection_sos_requested", false)) {
+            intent.removeExtra("protection_sos_requested")
+            channel?.invokeMethod("onProtectionSosRequested", null)
+        }
+    }
+
+    companion object {
+        private const val CHANNEL = "com.example.alerta_sismica/motion_protection"
+    }
+}
