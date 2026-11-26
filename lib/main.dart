@@ -135,13 +135,18 @@ Future<void> main() async {
     ),
   );
 
-  MotionProtectionService.escucharSolicitudSos(() async {
+  Future<void> abrirSosProteccion() async {
     navigatorKey.currentState?.push(
       MaterialPageRoute<void>(
         builder: (_) => const ProteccionSismicaScreen(sosSolicitado: true),
       ),
     );
-  });
+  }
+
+  MotionProtectionService.escucharSolicitudSos(abrirSosProteccion);
+  if (await MotionProtectionService.consumirSosPendiente()) {
+    await abrirSosProteccion();
+  }
 }
 
 class AlertaSismicaApp extends StatelessWidget {
