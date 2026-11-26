@@ -34,6 +34,12 @@ class MainActivity : FlutterActivity() {
                     stopService(Intent(this, MotionProtectionService::class.java))
                     result.success(true)
                 }
+                "consumePendingAlert" -> {
+                    val prefs = getSharedPreferences(MotionProtectionService.PREFS, MODE_PRIVATE)
+                    val pending = prefs.getBoolean("pending_alert_open", false)
+                    prefs.edit().putBoolean("pending_alert_open", false).apply()
+                    result.success(pending)
+                }
                 "confirmMovement" -> {
                     getSharedPreferences(MotionProtectionService.PREFS, MODE_PRIVATE).edit()
                         .putBoolean(MotionProtectionService.KEY_ALERT_PENDING, false).apply()
@@ -55,6 +61,7 @@ class MainActivity : FlutterActivity() {
             }
         }
         if (intent?.getBooleanExtra(MotionProtectionService.EXTRA_MOVEMENT_ALERT, false) == true) {
+            getSharedPreferences(MotionProtectionService.PREFS, MODE_PRIVATE).edit().putBoolean("pending_alert_open", true).apply()
             intent.removeExtra(MotionProtectionService.EXTRA_MOVEMENT_ALERT)
             channel?.invokeMethod("onMovementAlertOpened", null)
         }
@@ -68,6 +75,7 @@ class MainActivity : FlutterActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         if (intent.getBooleanExtra(MotionProtectionService.EXTRA_MOVEMENT_ALERT, false)) {
+            getSharedPreferences(MotionProtectionService.PREFS, MODE_PRIVATE).edit().putBoolean("pending_alert_open", true).apply()
             intent.removeExtra(MotionProtectionService.EXTRA_MOVEMENT_ALERT)
             channel?.invokeMethod("onMovementAlertOpened", null)
         }
