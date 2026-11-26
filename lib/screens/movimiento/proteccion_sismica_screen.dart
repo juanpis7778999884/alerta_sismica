@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../../models/emergencia.dart';
 import '../../providers/auth_provider.dart';
@@ -9,9 +10,10 @@ import '../../services/motion_protection_service.dart';
 import '../../theme.dart';
 
 class ProteccionSismicaScreen extends StatefulWidget {
-  const ProteccionSismicaScreen({super.key, this.sosSolicitado = false});
+  const ProteccionSismicaScreen({super.key, this.sosSolicitado = false, this.alertaAbierta = false});
 
   final bool sosSolicitado;
+  final bool alertaAbierta;
 
   @override
   State<ProteccionSismicaScreen> createState() => _ProteccionSismicaScreenState();
@@ -55,6 +57,12 @@ class _ProteccionSismicaScreenState extends State<ProteccionSismicaScreen> {
       _error = null;
     });
     try {
+      final permiso = await Permission.notification.request();
+      if (!permiso.isGranted && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Activa el permiso de notificaciones para recibir los avisos de protección.')),
+        );
+      }
       final ok = _activa
           ? await MotionProtectionService.detener()
           : await MotionProtectionService.iniciar();
@@ -71,6 +79,15 @@ class _ProteccionSismicaScreenState extends State<ProteccionSismicaScreen> {
         _error = 'No se pudo cambiar la protección: $e';
       });
     }
+  }
+
+  Future<void> _confirmarBien() async {
+    await MotionProtectionService.confirmarBien();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Gracias por confirmar que estás bien.')),
+    );
+    Navigator.of(context).pop();
   }
 
   Future<void> _activarSos() async {
@@ -166,6 +183,39 @@ class _ProteccionSismicaScreenState extends State<ProteccionSismicaScreen> {
               ),
             ),
           ),
+          if (widget.alertaAbierta) ...[
+            const SizedBox(height: 12),
+            Card(
+              color: theme.colorScheme.errorContainer,
+              child: Padding(
+                padding: AppTheme.paddingM,
+                child: Column(
+                  children: [
+                    const Text('Se detectó movimiento inusual. ¿Estás bien?'),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: _confirmarBien,
+                            child: const Text('Estoy bien'),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: FilledButton.icon(
+                            onPressed: _procesandoSos ? null : _activarSos,
+                            icon: const Icon(Icons.sos_rounded),
+                            label: const Text('Activar SOS'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
           if (_error != null) ...[
             const SizedBox(height: 12),
             Text(_error!, style: TextStyle(color: theme.colorScheme.error)),
