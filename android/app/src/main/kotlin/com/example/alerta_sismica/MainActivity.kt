@@ -66,6 +66,7 @@ class MainActivity : FlutterActivity() {
             channel?.invokeMethod("onMovementAlertOpened", null)
         }
         if (intent?.getBooleanExtra("protection_sos_requested", false) == true) {
+            getSharedPreferences(MotionProtectionService.PREFS, MODE_PRIVATE).edit().putBoolean("pending_sos", true).apply()
             intent.removeExtra("protection_sos_requested")
             channel?.invokeMethod("onProtectionSosRequested", null)
         }
@@ -80,6 +81,7 @@ class MainActivity : FlutterActivity() {
             channel?.invokeMethod("onMovementAlertOpened", null)
         }
         if (intent.getBooleanExtra("protection_sos_requested", false)) {
+            getSharedPreferences(MotionProtectionService.PREFS, MODE_PRIVATE).edit().putBoolean("pending_sos", true).apply()
             intent.removeExtra("protection_sos_requested")
             channel?.invokeMethod("onProtectionSosRequested", null)
         }
